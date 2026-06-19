@@ -329,6 +329,35 @@ def render_top_image() -> None:
     )
 
 
+def install_home_screen_icon() -> None:
+    streamlit_js_eval(
+        js_expressions="""
+        const iconHref = '/app/static/app-icon-512.png';
+        const manifestHref = '/app/static/manifest.json';
+        const upsertLink = (rel, href, attrs = {}) => {
+            let link = document.head.querySelector(`link[rel="${rel}"]`);
+            if (!link) {
+                link = document.createElement('link');
+                link.rel = rel;
+                document.head.appendChild(link);
+            }
+            link.href = href;
+            Object.entries(attrs).forEach(([key, value]) => link.setAttribute(key, value));
+        };
+        upsertLink('apple-touch-icon', iconHref, { sizes: '512x512' });
+        upsertLink('icon', iconHref, { type: 'image/png', sizes: '512x512' });
+        upsertLink('manifest', manifestHref);
+        document.querySelector('meta[name="theme-color"]')?.remove();
+        const theme = document.createElement('meta');
+        theme.name = 'theme-color';
+        theme.content = '#081b3f';
+        document.head.appendChild(theme);
+        """,
+        want_output=False,
+        key="home_screen_icon",
+    )
+
+
 def won(value: float | int) -> str:
     return f"{int(round(value)):,}원"
 
@@ -558,6 +587,7 @@ if not st.session_state.storage_loaded:
 
 state = st.session_state.state
 calc = calculate(state)
+install_home_screen_icon()
 render_top_image()
 tabs = st.tabs(["대시보드", "자산 입력", "수입 모드", "고정비 입력", "지출 기록", "카테고리 분석", "데이터 관리"])
 
