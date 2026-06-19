@@ -5,10 +5,10 @@ from datetime import date, datetime
 from pathlib import Path
 
 import streamlit as st
+from streamlit_js_eval import streamlit_js_eval
 
 APP_TITLE = "쫄지마"
-DATA_DIR = Path("data")
-DATA_PATH = DATA_DIR / "jjol-jima-data.json"
+LOCAL_STORAGE_KEY = "jjol_jima_state_v1"
 TOP_IMAGE_PATH = Path("top_jjol.png")
 
 ASSET_FIELDS = ["현금", "통장 잔고", "비상금", "받을 돈", "기타 자산"]
@@ -350,16 +350,10 @@ def default_state() -> dict:
     }
 
 
-def load_data() -> dict:
-    if not DATA_PATH.exists():
-        return default_state()
-    try:
-        with DATA_PATH.open("r", encoding="utf-8") as file:
-            loaded = json.load(file)
-    except (json.JSONDecodeError, OSError):
-        return default_state()
-
+def normalize_state(loaded: dict | None) -> dict:
     state = default_state()
+    if not isinstance(loaded, dict):
+        return state
     state.update({key: loaded.get(key, state[key]) for key in state.keys()})
     state["assets"] = {name: plain_number(state["assets"].get(name, 0)) for name in ASSET_FIELDS}
     state["fixed_costs"] = {name: plain_number(state["fixed_costs"].get(name, 0)) for name in FIXED_FIELDS}
@@ -369,10 +363,25 @@ def load_data() -> dict:
     return state
 
 
-def save_data(state: dict) -> None:
-    DATA_DIR.mkdir(exist_ok=True)
-    with DATA_PATH.open("w", encoding="utf-8") as file:
-        json.dump(state, file, ensure_ascii=False, indent=2)
+def browser_state_json(state: dict) -> str:
+    return json.dumps(normalize_state(state), ensure_ascii=False)
+
+
+def persist_browser_state(state: dict, key_suffix: str) -> None:
+    payload = json.dumps(browser_state_json(state), ensure_ascii=False)
+    streamlit_js_eval(
+        js_expressions=f"localStorage.setItem('{LOCAL_STORAGE_KEY}', {payload})",
+        want_output=False,
+        key=f"save_{key_suffix}_{datetime.now().timestamp()}",
+    )
+
+
+def clear_browser_state() -> None:
+    streamlit_js_eval(
+        js_expressions=f"localStorage.removeItem('{LOCAL_STORAGE_KEY}')",
+        want_output=False,
+        key=f"clear_{datetime.now().timestamp()}",
+    )
 
 
 def current_income(state: dict) -> int:
@@ -526,13 +535,31 @@ def render_reality_check(calc: dict) -> None:
     )
 
 
+stored_state = streamlit_js_eval(
+    js_expressions=f"localStorage.getItem('{LOCAL_STORAGE_KEY}') || '__JJOL_EMPTY__'",
+    key="load_state",
+)
+
 if "state" not in st.session_state:
-    st.session_state.state = load_data()
+    st.session_state.state = default_state()
+    st.session_state.storage_loaded = False
+
+if not st.session_state.storage_loaded:
+    if stored_state is None:
+        st.info("브라우저 저장소를 확인하는 중이야.")
+        st.stop()
+    if stored_state != "__JJOL_EMPTY__":
+        try:
+            st.session_state.state = normalize_state(json.loads(stored_state))
+        except json.JSONDecodeError:
+            st.warning("브라우저에 저장된 데이터를 읽지 못해서 새 상태로 시작할게.")
+            st.session_state.state = default_state()
+    st.session_state.storage_loaded = True
 
 state = st.session_state.state
 calc = calculate(state)
 render_top_image()
-tabs = st.tabs(["대시보드", "자산 입력", "수입 모드", "고정비 입력", "지출 기록", "카테고리 분석"])
+tabs = st.tabs(["대시보드", "자산 입력", "수입 모드", "고정비 입력", "지출 기록", "카테고리 분석", "데이터 관리"])
 
 with tabs[0]:
     main_left, main_right = st.columns([1.45, 0.85], gap="large")
@@ -606,9 +633,8 @@ with tabs[1]:
                 new_assets[name] = st.number_input(name, min_value=0, value=plain_number(state["assets"].get(name, 0)), step=10_000, format="%d")
         if st.form_submit_button("자산 저장"):
             state["assets"] = new_assets
-            save_data(state)
-            st.success("자산을 저장했어.")
-            st.rerun()
+            persist_browser_state(state, "assets")
+            st.success("자산을 이 브라우저에 저장했어.")
 
 with tabs[2]:
     st.subheader("수입 모드 설정")
@@ -623,9 +649,8 @@ with tabs[2]:
         if st.form_submit_button("수입 모드 저장"):
             state["income_mode"] = mode
             state["custom_income"] = plain_number(custom_income)
-            save_data(state)
-            st.success("수입 모드를 저장했어.")
-            st.rerun()
+            persist_browser_state(state, "income")
+            st.success("수입 모드를 이 브라우저에 저장했어.")
 
 with tabs[3]:
     st.subheader("고정비 입력")
@@ -638,9 +663,8 @@ with tabs[3]:
                 new_fixed[name] = st.number_input(name, min_value=0, value=plain_number(state["fixed_costs"].get(name, 0)), step=10_000, format="%d")
         if st.form_submit_button("고정비 저장"):
             state["fixed_costs"] = new_fixed
-            save_data(state)
-            st.success("고정비를 저장했어.")
-            st.rerun()
+            persist_browser_state(state, "fixed")
+            st.success("고정비를 이 브라우저에 저장했어.")
 
 with tabs[4]:
     st.subheader("지출 기록")
@@ -666,9 +690,8 @@ with tabs[4]:
                         "memo": memo.strip(),
                     }
                 )
-                save_data(state)
-                st.success("지출을 추가했어.")
-                st.rerun()
+                persist_browser_state(state, f"expense_{expense_date.isoformat()}_{amount}")
+                st.success("지출을 이 브라우저에 저장했어.")
 
     st.markdown("### 이번 달 지출")
     if not calc["month_expenses"]:
@@ -705,7 +728,41 @@ with tabs[5]:
                 unsafe_allow_html=True,
             )
 
-st.markdown("<p class='mini-note'>데이터는 이 컴퓨터의 앱 폴더 안 JSON 파일에만 저장돼. 은행 연동이나 API는 사용하지 않아.</p>", unsafe_allow_html=True)
+with tabs[6]:
+    st.subheader("데이터 관리")
+    st.caption("개인 데이터는 서버 파일에 저장하지 않고, 지금 접속한 브라우저의 localStorage에만 저장돼.")
+
+    backup_name = f"jjol-jima-backup-{date.today().isoformat()}.json"
+    st.download_button(
+        "백업 JSON 다운로드",
+        data=json.dumps(normalize_state(state), ensure_ascii=False, indent=2),
+        file_name=backup_name,
+        mime="application/json",
+    )
+
+    st.markdown("### 백업 불러오기")
+    uploaded_file = st.file_uploader("백업 JSON 파일 선택", type=["json"])
+    if uploaded_file is not None:
+        if st.button("백업 데이터로 복원"):
+            try:
+                restored = normalize_state(json.loads(uploaded_file.getvalue().decode("utf-8")))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                st.error("백업 파일을 읽지 못했어. JSON 파일인지 확인해줘.")
+            else:
+                st.session_state.state = restored
+                state = st.session_state.state
+                persist_browser_state(state, "restore")
+                st.success("백업 데이터를 이 브라우저에 복원했어. 대시보드가 곧 새 값으로 계산돼.")
+
+    st.markdown("### 전체 초기화")
+    confirm_reset = st.checkbox("정말로 이 브라우저에 저장된 쫄지마 데이터를 지울게.")
+    if st.button("전체 초기화", disabled=not confirm_reset):
+        st.session_state.state = default_state()
+        state = st.session_state.state
+        clear_browser_state()
+        st.success("이 브라우저의 쫄지마 데이터를 초기화했어.")
+
+st.markdown("<p class='mini-note'>은행 연동과 API는 사용하지 않아. 입력 데이터는 Streamlit 서버 파일이 아니라 이 브라우저의 localStorage에 저장돼.</p>", unsafe_allow_html=True)
 
 
 
