@@ -1,8 +1,8 @@
 {
   "name": "쫄지마",
   "short_name": "쫄지마",
-  "start_url": "./",
-  "scope": "./",
+  "start_url": "/JJol-JiMa/",
+  "scope": "/JJol-JiMa/",
   "display": "standalone",
   "background_color": "#f7f8fb",
   "theme_color": "#081b3f",
