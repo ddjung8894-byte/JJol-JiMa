@@ -1,13 +1,14 @@
 {
   "name": "쫄지마",
   "short_name": "쫄지마",
-  "start_url": "/",
+  "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f7f8fb",
   "theme_color": "#081b3f",
   "icons": [
     {
-      "src": "/app/static/app-icon-512.png",
+      "src": "app-icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
